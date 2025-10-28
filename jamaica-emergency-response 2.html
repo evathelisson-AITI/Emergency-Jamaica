@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jamaica Emergency Response - Hurricane Melissa</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        .map-container {
+            height: 400px;
+            width: 100%;
+            border-radius: 0.5rem;
+        }
+        .pulse {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: .5; }
+        }
+        .alert-banner {
+            background: linear-gradient(90deg, #dc2626, #991b1b);
+            animation: slideDown 0.5s ease-out;
+        }
+        @keyframes slideDown {
+            from { transform: translateY(-100%); }
+            to { transform: translateY(0); }
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // Simulated real-time data - In production, this would connect to actual APIs
+        const weatherData = {
+            currentConditions: {
+                wind: "145 mph (Category 4)",
+                pressure: "916 mb",
+                movement: "North-Northeast at 8 mph",
+                location: "15 miles east of Montego Bay",
+                rainfall: "20-30 inches expected",
+                surge: "9-13 feet",
+                lastUpdate: new Date().toLocaleTimeString()
+            },
+            alerts: [
+                { level: "critical", message: "HURRICANE WARNING - Category 5 landfall confirmed. SHELTER IN PLACE IMMEDIATELY." },
+                { level: "critical", message: "Catastrophic winds, flash flooding, and life-threatening storm surge ongoing" },
+                { level: "warning", message: "Do NOT leave shelter. Storm eye may create false calm." }
+            ]
+        };
+
+        const shelters = [
+            { id: 1, name: "National Arena", parish: "Kingston", capacity: 5000, status: "full", lat: 18.0179, lng: -76.7989, contact: "876-929-4970" },
+            { id: 2, name: "Tivoli Gardens Community Centre", parish: "Kingston", capacity: 2000, status: "available", lat: 17.9841, lng: -76.8029, contact: "876-948-5391" },
+            { id: 3, name: "Spanish Town Hospital", parish: "St. Catherine", capacity: 1500, status: "available", lat: 17.9911, lng: -76.9567, contact: "876-984-2621" },
+            { id: 4, name: "Montego Bay Convention Centre", parish: "St. James", capacity: 3500, status: "priority", lat: 18.4762, lng: -77.8939, contact: "876-979-3447" },
+            { id: 5, name: "May Pen High School", parish: "Clarendon", capacity: 1200, status: "available", lat: 17.9644, lng: -77.2424, contact: "876-986-2434" },
+            { id: 6, name: "Mandeville Sports Complex", parish: "Manchester", capacity: 2500, status: "available", lat: 18.0417, lng: -77.5031, contact: "876-962-2056" },
+            { id: 7, name: "Port Antonio High School", parish: "Portland", capacity: 1000, status: "available", lat: 18.1777, lng: -76.4531, contact: "876-993-2634" },
+            { id: 8, name: "Negril Community Centre", parish: "Westmoreland", capacity: 800, status: "priority", lat: 18.2677, lng: -78.3515, contact: "876-957-4369" }
+        ];
+
+        const emergencyReports = [
+            { id: 1, type: "medical", priority: "critical", parish: "St. James", description: "Hospital flooding, patients need evacuation", time: "14:30", lat: 18.4762, lng: -77.8939 },
+            { id: 2, type: "rescue", priority: "critical", parish: "Kingston", description: "Family trapped on roof, waters rising", time: "14:45", lat: 18.0179, lng: -76.7989 },
+            { id: 3, type: "structural", priority: "high", parish: "St. Catherine", description: "Building collapse, possible casualties", time: "15:00", lat: 17.9911, lng: -76.9567 },
+            { id: 4, type: "flood", priority: "high", parish: "Manchester", description: "Landslide blocking roads, community isolated", time: "15:15", lat: 18.0417, lng: -77.5031 },
+            { id: 5, type: "medical", priority: "medium", parish: "Portland", description: "Medical supplies needed at shelter", time: "15:30", lat: 18.1777, lng: -76.4531 }
+        ];
+
+        function EmergencyApp() {
+            const [activeTab, setActiveTab] = useState('dashboard');
+            const [reports, setReports] = useState(emergencyReports);
+            const [selectedParish, setSelectedParish] = useState('all');
+            const mapRef = useRef(null);
+            const mapInstance = useRef(null);
+
+            useEffect(() => {
+                if (activeTab === 'map' && mapRef.current && !mapInstance.current) {
+                    // Initialize map centered on Jamaica
+                    mapInstance.current = L.map(mapRef.current).setView([18.1096, -77.2975], 9);
+                    
+                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                        attribution: '© OpenStreetMap contributors'
+                    }).addTo(mapInstance.current);
+
+                    // Add hurricane icon (approximation)
+                    const hurricaneIcon = L.divIcon({
+                        className: 'hurricane-marker',
+                        html: '<div style="font-size: 30px;">🌀</div>',
+                        iconSize: [40, 40]
+                    });
+                    
+                    L.marker([18.4762, -77.8939], { icon: hurricaneIcon })
+                        .addTo(mapInstance.current)
+                        .bindPopup('<b>Hurricane Melissa Eye</b><br>Category 4 - 145 mph winds');
+
+                    // Add shelters
+                    shelters.forEach(shelter => {
+                        const color = shelter.status === 'full' ? 'red' : 
+                                    shelter.status === 'priority' ? 'orange' : 'green';
+                        const icon = L.divIcon({
+                            className: 'shelter-marker',
+                            html: `<div style="background-color: ${color}; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white;"></div>`,
+                            iconSize: [20, 20]
+                        });
+                        
+                        L.marker([shelter.lat, shelter.lng], { icon })
+                            .addTo(mapInstance.current)
+                            .bindPopup(`<b>${shelter.name}</b><br>Parish: ${shelter.parish}<br>Capacity: ${shelter.capacity}<br>Status: ${shelter.status.toUpperCase()}<br>Contact: ${shelter.contact}`);
+                    });
+
+                    // Add emergency reports
+                    reports.forEach(report => {
+                        const color = report.priority === 'critical' ? '#dc2626' : 
+                                    report.priority === 'high' ? '#f59e0b' : '#3b82f6';
+                        const icon = L.divIcon({
+                            className: 'emergency-marker',
+                            html: `<div style="background-color: ${color}; width: 15px; height: 15px; border-radius: 50%; border: 2px solid white; animation: pulse 2s infinite;"></div>`,
+                            iconSize: [15, 15]
+                        });
+                        
+                        L.marker([report.lat, report.lng], { icon })
+                            .addTo(mapInstance.current)
+                            .bindPopup(`<b>${report.type.toUpperCase()}</b><br>Priority: ${report.priority}<br>${report.description}<br>Time: ${report.time}`);
+                    });
+                }
+            }, [activeTab]);
+
+            const parishes = ['Kingston', 'St. James', 'St. Catherine', 'Manchester', 'Portland', 'Westmoreland', 'Clarendon', 'St. Andrew'];
+
+            const submitEmergencyReport = (e) => {
+                e.preventDefault();
+                const formData = new FormData(e.target);
+                const newReport = {
+                    id: reports.length + 1,
+                    type: formData.get('type'),
+                    priority: formData.get('priority'),
+                    parish: formData.get('parish'),
+                    description: formData.get('description'),
+                    time: new Date().toLocaleTimeString(),
+                    lat: 18.1096 + (Math.random() - 0.5) * 0.5,
+                    lng: -77.2975 + (Math.random() - 0.5) * 0.5
+                };
+                setReports([newReport, ...reports]);
+                e.target.reset();
+                alert('Emergency report submitted! Emergency services have been notified.');
+            };
+
+            return (
+                <div className="min-h-screen bg-gray-100">
+                    {/* Critical Alert Banner */}
+                    <div className="alert-banner text-white py-3 px-4 text-center font-bold">
+                        <span className="pulse">⚠️</span> HURRICANE MELISSA - CATEGORY 4 LANDFALL - SHELTER IN PLACE IMMEDIATELY <span className="pulse">⚠️</span>
+                    </div>
+
+                    {/* Header */}
+                    <div className="bg-red-700 text-white py-4 px-6 shadow-lg">
+                        <h1 className="text-3xl font-bold">Jamaica Emergency Response</h1>
+                        <p className="text-sm mt-1">Hurricane Melissa Real-Time Information System</p>
+                        <p className="text-xs mt-1 opacity-90">Last Updated: {weatherData.currentConditions.lastUpdate}</p>
+                    </div>
+
+                    {/* Navigation Tabs */}
+                    <div className="bg-white shadow-md">
+                        <div className="flex overflow-x-auto">
+                            {['dashboard', 'weather', 'shelters', 'report', 'map'].map(tab => (
+                                <button
+                                    key={tab}
+                                    onClick={() => setActiveTab(tab)}
+                                    className={`flex-1 py-3 px-4 font-semibold transition-colors ${
+                                        activeTab === tab 
+                                            ? 'bg-red-600 text-white' 
+                                            : 'bg-white text-gray-700 hover:bg-gray-100'
+                                    }`}
+                                >
+                                    {tab === 'dashboard' && '📊 Dashboard'}
+                                    {tab === 'weather' && '🌪️ Weather'}
+                                    {tab === 'shelters' && '🏠 Shelters'}
+                                    {tab === 'report' && '🚨 Report Emergency'}
+                                    {tab === 'map' && '🗺️ Map'}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="p-4 max-w-7xl mx-auto">
+                        {/* DASHBOARD TAB */}
+                        {activeTab === 'dashboard' && (
+                            <div className="space-y-4">
+                                <div className="bg-red-50 border-l-4 border-red-600 p-4 rounded">
+                                    <h3 className="font-bold text-red-800 mb-2">CRITICAL ALERTS</h3>
+                                    {weatherData.alerts.map((alert, idx) => (
+                                        <div key={idx} className={`mb-2 p-2 rounded ${
+                                            alert.level === 'critical' ? 'bg-red-200' : 'bg-yellow-200'
+                                        }`}>
+                                            <span className="font-bold">⚠️</span> {alert.message}
+                                        </div>
+                                    ))}
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div className="bg-white p-4 rounded-lg shadow">
+                                        <h3 className="font-bold text-lg mb-3 text-red-700">Current Storm Status</h3>
+                                        <div className="space-y-2">
+                                            <p><strong>Wind Speed:</strong> {weatherData.currentConditions.wind}</p>
+                                            <p><strong>Pressure:</strong> {weatherData.currentConditions.pressure}</p>
+                                            <p><strong>Movement:</strong> {weatherData.currentConditions.movement}</p>
+                                            <p><strong>Location:</strong> {weatherData.currentConditions.location}</p>
+                                            <p><strong>Expected Rainfall:</strong> {weatherData.currentConditions.rainfall}</p>
+                                            <p><strong>Storm Surge:</strong> {weatherData.currentConditions.surge}</p>
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-white p-4 rounded-lg shadow">
+                                        <h3 className="font-bold text-lg mb-3 text-orange-700">Priority Emergency Areas</h3>
+                                        <div className="space-y-2">
+                                            {reports.filter(r => r.priority === 'critical').map(report => (
+                                                <div key={report.id} className="border-l-4 border-red-600 pl-3 py-2 bg-red-50">
+                                                    <p className="font-bold text-sm">{report.parish} - {report.type.toUpperCase()}</p>
+                                                    <p className="text-sm">{report.description}</p>
+                                                    <p className="text-xs text-gray-600">Time: {report.time}</p>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="bg-white p-4 rounded-lg shadow">
+                                    <h3 className="font-bold text-lg mb-3 text-blue-700">Safety Guidelines</h3>
+                                    <ul className="list-disc pl-5 space-y-1">
+                                        <li><strong>DO NOT leave shelter</strong> - The storm is still extremely dangerous</li>
+                                        <li><strong>Stay away from windows</strong> and exterior walls</li>
+                                        <li><strong>Avoid flood waters</strong> - may contain crocodiles, debris, or electrical hazards</li>
+                                        <li><strong>Wait for official all-clear</strong> from authorities before leaving shelter</li>
+                                        <li><strong>Have emergency supplies</strong> - water, food, first aid, flashlight, radio</li>
+                                        <li><strong>Keep phone charged</strong> and monitor official sources only (JIS, ODPEM)</li>
+                                        <li><strong>Report emergencies</strong> using this app or call 119 (emergency services)</li>
+                                    </ul>
+                                </div>
+
+                                <div className="bg-blue-50 border-l-4 border-blue-600 p-4 rounded">
+                                    <h3 className="font-bold text-blue-800 mb-2">Official Information Sources</h3>
+                                    <p className="mb-2">Trust ONLY these official sources for accurate information:</p>
+                                    <ul className="list-disc pl-5">
+                                        <li><strong>ODPEM</strong> - Office of Disaster Preparedness and Emergency Management</li>
+                                        <li><strong>JIS</strong> - Jamaica Information Service</li>
+                                        <li><strong>Office of the Prime Minister</strong></li>
+                                        <li><strong>National Hurricane Center</strong> (NHC)</li>
+                                    </ul>
+                                    <p className="mt-2 text-sm text-blue-900"><strong>⚠️ BEWARE OF MISINFORMATION</strong> on social media claiming storm has passed</p>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* WEATHER TAB */}
+                        {activeTab === 'weather' && (
+                            <div className="space-y-4">
+                                <div className="bg-white p-6 rounded-lg shadow">
+                                    <h2 className="text-2xl font-bold mb-4 text-red-700">Hurricane Melissa - Current Conditions</h2>
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                        <div className="bg-red-50 p-4 rounded">
+                                            <h3 className="font-bold mb-2">Wind</h3>
+                                            <p className="text-2xl font-bold text-red-700">{weatherData.currentConditions.wind}</p>
+                                        </div>
+                                        <div className="bg-orange-50 p-4 rounded">
+                                            <h3 className="font-bold mb-2">Pressure</h3>
+                                            <p className="text-2xl font-bold text-orange-700">{weatherData.currentConditions.pressure}</p>
+                                        </div>
+                                        <div className="bg-blue-50 p-4 rounded">
+                                            <h3 className="font-bold mb-2">Storm Surge</h3>
+                                            <p className="text-2xl font-bold text-blue-700">{weatherData.currentConditions.surge}</p>
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="mt-6 p-4 bg-gray-50 rounded">
+                                        <h3 className="font-bold mb-2">Storm Movement</h3>
+                                        <p><strong>Current Location:</strong> {weatherData.currentConditions.location}</p>
+                                        <p><strong>Direction & Speed:</strong> {weatherData.currentConditions.movement}</p>
+                                        <p className="mt-4"><strong>Expected Rainfall:</strong> {weatherData.currentConditions.rainfall}</p>
+                                        <p className="text-sm text-red-600 mt-2">⚠️ Catastrophic flooding and mudslides expected in elevated areas</p>
+                                    </div>
+                                </div>
+
+                                <div className="bg-yellow-50 border-l-4 border-yellow-600 p-4 rounded">
+                                    <h3 className="font-bold text-yellow-800 mb-2">Next 24 Hours Forecast</h3>
+                                    <ul className="space-y-2">
+                                        <li><strong>Next 6 hours:</strong> Continuing catastrophic conditions in western Jamaica. Eye may pass creating brief calm - DO NOT LEAVE SHELTER</li>
+                                        <li><strong>6-12 hours:</strong> Storm moving toward Cuba. Conditions will remain dangerous with heavy rain and flooding</li>
+                                        <li><strong>12-24 hours:</strong> Gradual improvement but flooding will persist. Wait for official all-clear</li>
+                                    </ul>
+                                </div>
+
+                                <div className="bg-white p-4 rounded-lg shadow">
+                                    <h3 className="font-bold text-lg mb-3">Parish-by-Parish Impact</h3>
+                                    <div className="space-y-2">
+                                        <div className="border-l-4 border-red-600 pl-3 py-2 bg-red-50">
+                                            <strong>St. James & Westmoreland:</strong> Direct hit - Catastrophic damage, total structural failure expected
+                                        </div>
+                                        <div className="border-l-4 border-orange-600 pl-3 py-2 bg-orange-50">
+                                            <strong>Manchester & Clarendon:</strong> Severe - Extreme flooding, landslides in mountains
+                                        </div>
+                                        <div className="border-l-4 border-yellow-600 pl-3 py-2 bg-yellow-50">
+                                            <strong>Kingston & St. Catherine:</strong> Major - Severe flooding, structural damage, storm surge
+                                        </div>
+                                        <div className="border-l-4 border-blue-600 pl-3 py-2 bg-blue-50">
+                                            <strong>Portland:</strong> Moderate - Heavy rain, tropical storm winds, flooding
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* SHELTERS TAB */}
+                        {activeTab === 'shelters' && (
+                            <div className="space-y-4">
+                                <div className="bg-blue-50 border-l-4 border-blue-600 p-4 rounded">
+                                    <h3 className="font-bold text-blue-800 mb-2">🏠 Emergency Shelter Information</h3>
+                                    <p className="mb-2">If you are not already in a shelter, <strong>SHELTER IN PLACE</strong>. Do not attempt to travel.</p>
+                                    <p className="text-sm">Color codes: <span className="inline-block w-3 h-3 bg-green-500 rounded-full"></span> Available | <span className="inline-block w-3 h-3 bg-orange-500 rounded-full"></span> Priority/Limited | <span className="inline-block w-3 h-3 bg-red-500 rounded-full"></span> Full</p>
+                                </div>
+
+                                <div className="bg-white p-4 rounded-lg shadow">
+                                    <label className="block mb-2 font-semibold">Filter by Parish:</label>
+                                    <select 
+                                        value={selectedParish}
+                                        onChange={(e) => setSelectedParish(e.target.value)}
+                                        className="w-full p-2 border rounded"
+                                    >
+                                        <option value="all">All Parishes</option>
+                                        {parishes.map(parish => (
+                                            <option key={parish} value={parish}>{parish}</option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    {shelters
+                                        .filter(shelter => selectedParish === 'all' || shelter.parish === selectedParish)
+                                        .map(shelter => (
+                                        <div key={shelter.id} className={`bg-white p-4 rounded-lg shadow border-l-4 ${
+                                            shelter.status === 'full' ? 'border-red-600' :
+                                            shelter.status === 'priority' ? 'border-orange-600' :
+                                            'border-green-600'
+                                        }`}>
+                                            <div className="flex justify-between items-start mb-2">
+                                                <h3 className="font-bold text-lg">{shelter.name}</h3>
+                                                <span className={`px-2 py-1 rounded text-xs font-bold ${
+                                                    shelter.status === 'full' ? 'bg-red-200 text-red-800' :
+                                                    shelter.status === 'priority' ? 'bg-orange-200 text-orange-800' :
+                                                    'bg-green-200 text-green-800'
+                                                }`}>
+                                                    {shelter.status.toUpperCase()}
+                                                </span>
+                                            </div>
+                                            <p className="text-sm text-gray-600 mb-1"><strong>Parish:</strong> {shelter.parish}</p>
+                                            <p className="text-sm text-gray-600 mb-1"><strong>Capacity:</strong> {shelter.capacity} people</p>
+                                            <p className="text-sm text-gray-600 mb-3"><strong>Contact:</strong> {shelter.contact}</p>
+                                            {shelter.status === 'full' && (
+                                                <p className="text-xs text-red-600">⚠️ This shelter is at capacity</p>
+                                            )}
+                                            {shelter.status === 'priority' && (
+                                                <p className="text-xs text-orange-600">⚠️ Priority area - limited space</p>
+                                            )}
+                                            <button className="mt-2 w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700">
+                                                Get Directions
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                <div className="bg-yellow-50 border-l-4 border-yellow-600 p-4 rounded">
+                                    <h3 className="font-bold text-yellow-800 mb-2">⚠️ Important Notice</h3>
+                                    <ul className="list-disc pl-5 space-y-1 text-sm">
+                                        <li>Do NOT attempt to travel to a shelter during the storm</li>
+                                        <li>If you're not in a shelter, stay where you are and move to the safest room</li>
+                                        <li>Approximately 25,000 tourists are being cared for in hotels and resorts</li>
+                                        <li>Shelters are providing food, water, and medical assistance</li>
+                                        <li>Contact shelter directly if you have urgent medical needs</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* REPORT EMERGENCY TAB */}
+                        {activeTab === 'report' && (
+                            <div className="space-y-4">
+                                <div className="bg-red-50 border-l-4 border-red-600 p-4 rounded">
+                                    <h3 className="font-bold text-red-800 mb-2">🚨 Report Emergency</h3>
+                                    <p className="mb-2"><strong>For immediate life-threatening emergencies, call 119</strong></p>
+                                    <p className="text-sm">Use this form to report emergencies and help emergency services prioritize response areas</p>
+                                </div>
+
+                                <div className="bg-white p-6 rounded-lg shadow">
+                                    <form onSubmit={submitEmergencyReport} className="space-y-4">
+                                        <div>
+                                            <label className="block font-semibold mb-2">Emergency Type *</label>
+                                            <select name="type" required className="w-full p-2 border rounded">
+                                                <option value="">Select type...</option>
+                                                <option value="rescue">🆘 Rescue Needed</option>
+                                                <option value="medical">🏥 Medical Emergency</option>
+                                                <option value="fire">🔥 Fire</option>
+                                                <option value="flood">🌊 Severe Flooding</option>
+                                                <option value="structural">🏚️ Building Collapse/Damage</option>
+                                                <option value="blocked">🚧 Road Blocked/Impassable</option>
+                                                <option value="power">⚡ Downed Power Lines</option>
+                                                <option value="supplies">📦 Critical Supplies Needed</option>
+                                            </select>
+                                        </div>
+
+                                        <div>
+                                            <label className="block font-semibold mb-2">Priority Level *</label>
+                                            <select name="priority" required className="w-full p-2 border rounded">
+                                                <option value="">Select priority...</option>
+                                                <option value="critical">🔴 CRITICAL - Life threatening</option>
+                                                <option value="high">🟠 HIGH - Urgent assistance needed</option>
+                                                <option value="medium">🟡 MEDIUM - Needs attention soon</option>
+                                                <option value="low">🟢 LOW - Can wait</option>
+                                            </select>
+                                        </div>
+
+                                        <div>
+                                            <label className="block font-semibold mb-2">Parish *</label>
+                                            <select name="parish" required className="w-full p-2 border rounded">
+                                                <option value="">Select parish...</option>
+                                                {parishes.map(parish => (
+                                                    <option key={parish} value={parish}>{parish}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+
+                                        <div>
+                                            <label className="block font-semibold mb-2">Location Details</label>
+                                            <input 
+                                                type="text" 
+                                                name="location"
+                                                placeholder="Street address or landmark"
+                                                className="w-full p-2 border rounded"
+                                            />
+                                        </div>
+
+                                        <div>
+                                            <label className="block font-semibold mb-2">Description *</label>
+                                            <textarea 
+                                                name="description"
+                                                required
+                                                rows="4"
+                                                placeholder="Describe the emergency in detail..."
+                                                className="w-full p-2 border rounded"
+                                            ></textarea>
+                                        </div>
+
+                                        <div>
+                                            <label className="block font-semibold mb-2">Contact Number</label>
+                                            <input 
+                                                type="tel" 
+                                                name="phone"
+                                                placeholder="876-XXX-XXXX"
+                                                className="w-full p-2 border rounded"
+                                            />
+                                        </div>
+
+                                        <button type="submit" className="w-full bg-red-600 text-white py-3 rounded-lg font-bold hover:bg-red-700">
+                                            SUBMIT EMERGENCY REPORT
+                                        </button>
+                                    </form>
+                                </div>
+
+                                <div className="bg-blue-50 border-l-4 border-blue-600 p-4 rounded">
+                                    <h3 className="font-bold text-blue-800 mb-2">📞 Emergency Contacts</h3>
+                                    <ul className="space-y-1">
+                                        <li><strong>Emergency Services:</strong> 119</li>
+                                        <li><strong>Police:</strong> 119</li>
+                                        <li><strong>Fire:</strong> 110</li>
+                                        <li><strong>Ambulance:</strong> 110</li>
+                                        <li><strong>ODPEM Hotline:</strong> 1-888-PREPARE (773-7273)</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* MAP TAB */}
+                        {activeTab === 'map' && (
+                            <div className="space-y-4">
+                                <div className="bg-blue-50 border-l-4 border-blue-600 p-4 rounded">
+                                    <h3 className="font-bold text-blue-800 mb-2">🗺️ Real-Time Emergency Map</h3>
+                                    <p className="text-sm mb-2">Track hurricane position, shelter locations, and emergency reports</p>
+                                    <div className="flex gap-4 text-sm">
+                                        <span>🌀 Hurricane Eye</span>
+                                        <span>🟢 Shelters (Available)</span>
+                                        <span>🟠 Shelters (Limited)</span>
+                                        <span>🔴 Shelters (Full)</span>
+                                        <span className="pulse">📍 Emergencies</span>
+                                    </div>
+                                </div>
+
+                                <div className="bg-white p-4 rounded-lg shadow">
+                                    <div ref={mapRef} className="map-container"></div>
+                                </div>
+
+                                <div className="bg-white p-4 rounded-lg shadow">
+                                    <h3 className="font-bold text-lg mb-3 text-red-700">Priority Emergency Response Areas</h3>
+                                    <div className="space-y-2">
+                                        {reports
+                                            .sort((a, b) => {
+                                                const priorityOrder = { critical: 0, high: 1, medium: 2, low: 3 };
+                                                return priorityOrder[a.priority] - priorityOrder[b.priority];
+                                            })
+                                            .map(report => (
+                                            <div key={report.id} className={`border-l-4 pl-3 py-2 ${
+                                                report.priority === 'critical' ? 'border-red-600 bg-red-50' :
+                                                report.priority === 'high' ? 'border-orange-600 bg-orange-50' :
+                                                'border-yellow-600 bg-yellow-50'
+                                            }`}>
+                                                <div className="flex justify-between">
+                                                    <div>
+                                                        <p className="font-bold text-sm">
+                                                            {report.priority === 'critical' ? '🔴' : report.priority === 'high' ? '🟠' : '🟡'} 
+                                                            {' '}{report.parish} - {report.type.toUpperCase()}
+                                                        </p>
+                                                        <p className="text-sm">{report.description}</p>
+                                                    </div>
+                                                    <span className="text-xs text-gray-600">{report.time}</span>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Footer */}
+                    <div className="bg-gray-800 text-white py-6 px-6 mt-8">
+                        <div className="max-w-7xl mx-auto text-center">
+                            <p className="font-bold mb-2">Jamaica Emergency Response System</p>
+                            <p className="text-sm mb-2">For official information, visit JIS, ODPEM, or Office of the Prime Minister</p>
+                            <p className="text-xs opacity-75">This is a demonstration emergency response tool. In production, this would integrate with official government systems, real-time weather APIs, GPS tracking, and emergency services dispatch.</p>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.render(<EmergencyApp />, document.getElementById('root'));
+    </script>
+</body>
+</html>
